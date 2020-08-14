@@ -9,6 +9,9 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Mono.Cecil;
+using HarmonyLib;
+using Newtonsoft.Json;
+using Debug = UnityEngine.Debug;
 
 namespace JFramework
 {
@@ -16,65 +19,122 @@ namespace JFramework
     {
         public static string gamePath = Application.dataPath + "/../";
         public static string modPath = "Unknown";
+        public static Harmony harmony;
         static bool hasStarted;
 
-        public static void Entry() 
+        public static List<Mod> mods = new List<Mod>();
+
+        public static void FrameworkEntry()
         {
             if (hasStarted) return;
             hasStarted = true;
+            ConsoleManager.CreateConsole();
 
-            Process[] peoplePlayground = Process.GetProcessesByName("People Playground");
-            string assemblyPath = peoplePlayground[0].MainModule.FileName.Replace("People Playground.exe", "");
-
-            if (!File.Exists(assemblyPath + @"People Playground_Data\Managed\JFramework.dll") && File.Exists(Path.Combine(modPath,"JFramework.dll")))
+            for (int i = 0; i <= 31; i++) //user defined layers start with layer 8 and unity supports 31 layers
             {
-                File.Copy(Path.Combine(modPath, "JFramework.dll"), assemblyPath + @"People Playground_Data\Managed\JFramework.dll");
-            }
-            if (!File.Exists(assemblyPath + @"People Playground_Data\Managed\Mono.Cecil.dll") && File.Exists(Path.Combine(modPath, "Mono.Cecil.dll")))
-            {
-                File.Copy(Path.Combine(modPath, "Mono.Cecil.dll"), assemblyPath + @"People Playground_Data\Managed\Mono.Cecil.dll");
-            }
-            if (!File.Exists(assemblyPath + @"People Playground_Data\Managed\Mono.Cecil.Mdb.dll") && File.Exists(Path.Combine(modPath, "Mono.Cecil.Mdb.dll")))
-            {
-                File.Copy(Path.Combine(modPath, "Mono.Cecil.Mdb.dll"), assemblyPath + @"People Playground_Data\Managed\Mono.Cecil.Mdb.dll");
-            }
-            if (!File.Exists(assemblyPath + @"People Playground_Data\Managed\0Harmony.dll") && File.Exists(Path.Combine(modPath, "0Harmony.dll")))
-            {
-                File.Copy(Path.Combine(modPath, "0Harmony.dll"), assemblyPath + @"People Playground_Data\Managed\0Harmony.dll");
+                if (!SortingLayer.IsValid(i)) continue;
+                var layerN = SortingLayer.IDToName(i); //get the name of the layer
+                Debug.Log($"{i} - {layerN}");
             }
 
+            var assembly = Assembly.GetCallingAssembly();
+            Console.WriteLine("Running on " + assembly.GetName());
+            harmony = new Harmony("johnnyjohnny.modloader");
+            harmony.PatchAll();
 
-            assemblyPath += @"People Playground_Data\Managed\Assembly-CSharp.dll";
+            Console.WriteLine("Harmony patched");
+        }
 
-            AssemblyDefinition ass = AssemblyDefinition.ReadAssembly(assemblyPath);
-            ModuleDefinition mod = ass.MainModule;
-            if (mod.GetType("JFrameworkIdentifier") == null)
+        internal static void LoadSpawnables()
+        {
+            foreach (Mod mod in mods)
             {
-                UnityEngine.Debug.Log("Path is " + modPath);
-
-                if (File.Exists(Path.Combine(modPath, "JFrameworkInstaller.exe")))
+                foreach (CustomSpawnable spawnable in mod.spawnables)
                 {
-                    string path = Path.Combine(modPath, "JFrameworkInstaller.exe");
-                    UnityEngine.Debug.Log("Installer found at " + path);
-                    ModAPI.Notify("Installer found at " + path);
-
-                    Process installer = new Process();
-                    installer.StartInfo.UseShellExecute = false;
-                    installer.StartInfo.FileName = path;
-                    installer.Start();
-                }
-                else
-                {
-                    UnityEngine.Debug.LogError("Installer could not be found in mod folder, please try to reinstall the mod");
-                    ModAPI.Notify("Installer could not be found in mod folder, please try to reinstall the mod");
+                    SpawnableAsset a = mod.Deserialize<SpawnableAsset>(spawnable.spawnableAsset);
+                    if(a!=null)
+                    {
+                        mod.loadedSpawnables.Add(a);
+                        Debug.Log($"Spawnable {a.name} was loaded for {mod.name}");
+                    }
+                    else
+                    {
+                        Debug.Log($"Failed to load {spawnable.spawnableAsset.asset} in {spawnable.spawnableAsset.bundle} for {mod.name}");
+                    }
                 }
             }
-            else
+        }
+
+        internal static void LoadMaps()
+        {
+            Debug.Log("h");
+            MapSelectionMenuBehaviour menu = GameObject.FindObjectOfType<MapSelectionMenuBehaviour>();
+            foreach (Mod mod in mods)
             {
-                ModAPI.Notify("JFramework already installed");
+                foreach (Prefab prefab in mod.maps)
+                {
+                    Debug.Log(prefab.asset);
+                    Map a = mod.Deserialize<Map>(prefab);
+                    if (a != null)
+                    {
+                        mod.loadedMaps.Add(a);
+                        UnityEngine.Object.Instantiate<GameObject>(menu.MapViewPrefab, Vector3.zero, Quaternion.identity, menu.transform).GetComponent<MapViewBehaviour>().Map = a;
+                        Debug.Log($"Map {a.name} was loaded for {mod.name}");
+                    }
+                    else
+                    {
+                        Debug.Log($"Failed to load {prefab.asset} in {prefab.bundle} for {mod.name}");
+                    }
+                }
             }
-            mod.Dispose();
-            ass.Dispose();
+        }
+
+        internal static void LoadBundles()
+        {
+            foreach (Mod mod in mods)
+            {
+                foreach (string bundle in mod.bundles)
+                {
+                    string path = $@"{mod.path}\{bundle}";
+                    if (File.Exists(path))
+                    {
+                        mod.loadedBundles.Add(AssetBundle.LoadFromFile(path));
+                        Debug.Log($"Bundle {bundle} was loaded for {mod.name}");
+                    }
+                    else Debug.Log($"Could not find bundle {bundle} for {mod.name}");
+                }
+            }
+        }
+
+        internal static void LoadAssemblies()
+        {
+            foreach (Mod mod in mods)
+            {
+                foreach (string assembly in mod.assemblies)
+                {
+                    string path = $@"{mod.path}\{assembly}";
+                    if (File.Exists(path))
+                    {
+                        mod.loadedAssemblies.Add(Assembly.LoadFile(path));
+                    }
+                    else Debug.Log($"Could not find assembly {assembly} for {mod.name}");
+                }
+            }
+        }
+
+        internal static void LoadJsons(string fromFolder)
+        {
+            foreach (string file in Directory.GetFiles(fromFolder, "*.json", SearchOption.AllDirectories))
+            {
+                if (file.Contains("jmod"))
+                {
+                    string lines = File.ReadAllText(file);
+                    Mod info = JsonConvert.DeserializeObject<Mod>(lines);
+                    info.path = file.Replace("jmod.json", "");
+                    mods.Add(info);
+                    Debug.Log($"Loaded JFramework Mod:\nName: {info.name}\nPath: {info.path}");
+                }
+            }
         }
     }
 }

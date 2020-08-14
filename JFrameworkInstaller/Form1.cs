@@ -6,11 +6,14 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using dnlib.DotNet;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
+using Mono.Cecil.Rocks;
 
 namespace JFrameworkInstaller
 {
@@ -57,9 +60,17 @@ namespace JFrameworkInstaller
                             TypeDefinition type = mod.GetType("ModInitialisationBehaviour");
                             Info.Text = $"{type.FullName} is ModInitialisationBehaviour";
 
-                            mod.AssemblyReferences.Add(new AssemblyNameReference("JFramework", new Version(1, 0, 0, 0)));
+                            MethodDefinition toEdit = type.Methods.Single(m => m.Name=="Start");
+
                             TypeDefinition identifier = new TypeDefinition("", "JFrameworkIdentifier", Mono.Cecil.TypeAttributes.Public);
                             mod.Types.Add(identifier);
+                            TypeReference t = mod.ImportReference(typeof(JFramework.Main));
+                            MethodReference JFrameworkEntry = mod.ImportReference(typeof(JFramework.Main).GetMethod("FrameworkEntry"));
+
+                            var processor = toEdit.Body.GetILProcessor();
+                            var newInstruction = processor.Create(OpCodes.Call, JFrameworkEntry);
+                            var firstInstruction = toEdit.Body.Instructions[0];
+                            processor.InsertBefore(firstInstruction, newInstruction);
 
                             ass.Write(assemblyPath.Replace("CSharp", "CSharpModified"));
                             mod.Dispose();
