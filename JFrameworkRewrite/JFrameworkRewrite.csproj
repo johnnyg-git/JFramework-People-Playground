@@ -83,7 +83,6 @@
     <Compile Include="Mods\CustomSpawnable.cs" />
     <Compile Include="Mods\Map.cs" />
     <Compile Include="Mods\Mod.cs" />
-    <Compile Include="Mods\Modification.cs" />
     <Compile Include="Mods\ModModule.cs" />
     <Compile Include="Mods\Prefab.cs" />
     <Compile Include="Mods\Script.cs" />
